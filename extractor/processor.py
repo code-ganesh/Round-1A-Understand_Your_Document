@@ -1,45 +1,61 @@
-from PyPDF2 import PdfReader
-from .utils import clean_text, detect_heading_level
+import fitz  # PyMuPDF
 import re
+from .utils import clean_text
+
+def detect_heading_level(text, font_size):
+    """Heuristic based on font size and patterns"""
+    if re.match(r'(Section|Chapter)\s+\d+(\.\d+)*', text):
+        depth = text.count('.')
+        return f"H{depth + 1}" if depth else "H1"
+    elif font_size >= 16:
+        return "H1"
+    elif font_size >= 14:
+        return "H2"
+    else:
+        return "H3"
 
 def extract_headings(pdf_path):
-    reader = PdfReader(pdf_path)
+    doc = fitz.open(pdf_path)
     outline = []
 
-    for page_number, page in enumerate(reader.pages):
-        try:
-            text = page.extract_text()
-        except:
-            continue
+    # Collect text items from all pages
+    for page_number in range(len(doc)):
+        page = doc.load_page(page_number)
+        blocks = page.get_text("dict")["blocks"]
 
-        if not text:
-            continue
-
-        lines = text.split('\n')
-        for line in lines:
-            cleaned = clean_text(line)
-            if not cleaned:
+        for block in blocks:
+            if "lines" not in block:
                 continue
 
-            # Skip long body lines or sentences
-            if cleaned.endswith('.') or len(cleaned.split()) > 12:
-                continue
+            for line in block["lines"]:
+                line_text = ""
+                max_font_size = 0
+                is_bold = False
 
-            # Match structured patterns first
-            if re.match(r'(Section|Chapter)\s+\d+(\.\d+)*:?', cleaned):
-                level = detect_heading_level(cleaned)
-                outline.append({
-                    "level": level,
-                    "text": cleaned,
-                    "page": page_number
-                })
+                for span in line["spans"]:
+                    if not span["text"].strip():
+                        continue
+                    line_text += span["text"].strip() + " "
+                    max_font_size = max(max_font_size, span["size"])
+                    if "Bold" in span["font"]:
+                        is_bold = True
 
-            # Fallback: detect generic headings like "Introduction", "Objectives", etc.
-            elif (cleaned.istitle() or cleaned.isupper()) and len(cleaned.split()) <= 5:
+                cleaned = clean_text(line_text.strip())
+                if not cleaned:
+                    continue
+
+                # Filter likely headings
+                if len(cleaned.split()) > 12 or cleaned.endswith("."):
+                    continue
+                if not is_bold and max_font_size < 13:
+                    continue
+
+                heading_level = detect_heading_level(cleaned, max_font_size)
+
                 outline.append({
-                    "level": "H1",  # default level
+                    "level": heading_level,
                     "text": cleaned,
-                    "page": page_number
+                    "page": page_number  # ✅ 0-based
                 })
 
     return outline
