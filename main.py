@@ -1,25 +1,25 @@
 import os
-from extractor.processor import extract_headings
 import json
+from extractor.processor import extract_title, extract_headings
 
-print("📄 Running PDF outline extractor...")
+def main():
+    print("📄 Running PDF outline extractor...")
+    input_dir = "/app/input"
+    output_dir = "/app/output"
 
-input_dir = "input"
-output_dir = "output"
+    for filename in os.listdir(input_dir):
+        if filename.lower().endswith(".pdf"):
+            input_path = os.path.join(input_dir, filename)
+            output_path = os.path.join(output_dir, filename.rsplit(".", 1)[0] + ".json")
+            title = extract_title(input_path)
+            outline = extract_headings(input_path)
 
-pdf_files = [f for f in os.listdir(input_dir) if f.endswith(".pdf")]
-print("Found PDFs:", pdf_files)
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "title": title,
+                    "outline": outline
+                }, f, indent=2, ensure_ascii=False)
+    print("✅ Done.")
 
-for pdf in pdf_files:
-    input_path = os.path.join(input_dir, pdf)
-    output_path = os.path.join(output_dir, pdf.replace(".pdf", ".json"))
-
-    print(f"🔍 Processing: {input_path}")
-    outline = extract_headings(input_path)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "title": pdf,
-            "outline": outline
-        }, f, indent=2, ensure_ascii=False)
-
-    print(f"✅ Writing output to {output_path}")
+if __name__ == "__main__":
+    main()

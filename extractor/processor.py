@@ -1,61 +1,77 @@
-import fitz  # PyMuPDF
+import fitz
 import re
-from .utils import clean_text
+from .utils import clean_text, merge_adjacent_spans, is_heading_like
 
-def detect_heading_level(text, font_size):
-    """Heuristic based on font size and patterns"""
-    if re.match(r'(Section|Chapter)\s+\d+(\.\d+)*', text):
-        depth = text.count('.')
-        return f"H{depth + 1}" if depth else "H1"
-    elif font_size >= 16:
-        return "H1"
-    elif font_size >= 14:
-        return "H2"
-    else:
-        return "H3"
+def extract_title(pdf_path):
+    doc = fitz.open(pdf_path)
+    first_page = doc[0]
+    blocks = first_page.get_text("dict")["blocks"]
+
+    candidates = []
+    for block in blocks:
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                if span["text"].strip():
+                    candidates.append((span["text"], span["size"]))
+    if not candidates:
+        return "Untitled Document"
+
+    title_text, _ = max(candidates, key=lambda x: x[1])
+    return clean_text(title_text)
 
 def extract_headings(pdf_path):
     doc = fitz.open(pdf_path)
-    outline = []
+    headings = []
+    font_sizes = {}
 
-    # Collect text items from all pages
-    for page_number in range(len(doc)):
-        page = doc.load_page(page_number)
-        blocks = page.get_text("dict")["blocks"]
-
-        for block in blocks:
-            if "lines" not in block:
-                continue
-
-            for line in block["lines"]:
-                line_text = ""
-                max_font_size = 0
-                is_bold = False
-
-                for span in line["spans"]:
-                    if not span["text"].strip():
+    # Pass 1: collect font size stats
+    for page in doc:
+        for block in page.get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    text = clean_text(span["text"])
+                    if not text:
                         continue
-                    line_text += span["text"].strip() + " "
-                    max_font_size = max(max_font_size, span["size"])
-                    if "Bold" in span["font"]:
-                        is_bold = True
+                    size = round(span["size"], 1)
+                    font_sizes[size] = font_sizes.get(size, 0) + 1
 
-                cleaned = clean_text(line_text.strip())
-                if not cleaned:
-                    continue
+    if not font_sizes:
+        return []
 
-                # Filter likely headings
-                if len(cleaned.split()) > 12 or cleaned.endswith("."):
-                    continue
-                if not is_bold and max_font_size < 13:
-                    continue
+    # Top 3 font sizes
+    sorted_sizes = sorted(font_sizes.items(), key=lambda x: (-x[0], -x[1]))
+    size_to_level = {}
+    for idx, (size, _) in enumerate(sorted_sizes[:3]):
+        size_to_level[size] = f"H{idx+1}"
 
-                heading_level = detect_heading_level(cleaned, max_font_size)
+    # Pass 2: Extract with filters
+    for page_num, page in enumerate(doc):
+        blocks = page.get_text("dict")["blocks"]
+        spans = []
+        for block in blocks:
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    text = clean_text(span["text"])
+                    if not text:
+                        continue
+                    spans.append({
+                        "text": text,
+                        "size": round(span["size"], 1),
+                        "font": span["font"],
+                        "flags": span["flags"]
+                    })
 
-                outline.append({
-                    "level": heading_level,
-                    "text": cleaned,
-                    "page": page_number  # ✅ 0-based
-                })
+        # Merge "1." and "Objective" if applicable
+        merged_spans = merge_adjacent_spans(spans)
 
-    return outline
+        for item in merged_spans:
+            text = item["text"]
+            size = item["size"]
+            if size in size_to_level:
+                if is_heading_like(text):
+                    headings.append({
+                        "text": text,
+                        "level": size_to_level[size],
+                        "page": page_num
+                    })
+    return headings
