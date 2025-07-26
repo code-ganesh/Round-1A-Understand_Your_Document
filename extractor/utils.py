@@ -13,35 +13,36 @@ def merge_adjacent_spans(spans):
         current = spans[i]
         if i < len(spans) - 1:
             next_span = spans[i + 1]
-            if current["size"] == next_span["size"]:
+            if current["size"] == next_span["size"] and current["font"] == next_span["font"]:
                 merged.append({
                     "text": f"{current['text']} {next_span['text']}",
-                    "size": current["size"]
+                    "size": current["size"],
+                    "font": current["font"]
                 })
                 skip = True
             else:
-                merged.append({
-                    "text": current["text"],
-                    "size": current["size"]
-                })
+                merged.append(current)
         else:
-            merged.append({
-                "text": current["text"],
-                "size": current["size"]
-            })
+            merged.append(current)
     return merged
 
 def is_heading_like(text):
-    # Only allow short strings that look like headings
+    text = text.strip()
+
+    if not text or len(text) > 150:
+        return False
     if len(text.split()) > 15:
         return False
-    # Disallow typical paragraph patterns
-    if re.match(r'^[a-z]', text):
+    if re.search(r'\.(com|org|edu|http)', text, re.IGNORECASE):
         return False
-    # Allow numbered headings, Roman, etc.
-    if re.match(r'^(\d+\.|\(?[ivxIVX]{1,4}\)?\.?)\s*\w+', text):
+    if re.match(r'^[a-z]', text):  # lowercase start = likely paragraph
+        return False
+    if re.search(r'\w+\.\w{2,4}$', text):  # skip links/emails
+        return False
+
+    # Allow titles like "1. Objective", "I. Introduction"
+    if re.match(r'^(\(?[ivxIVX\d]{1,4}\)?\.?)\s+\w+', text):
         return True
-    # Allow capital or title-case phrases
-    if re.match(r'^[A-Z][A-Za-z\s\-:\(\)]+$', text) and not text.endswith("."):
+    if re.match(r'^[A-Z][\w\s:()\-/,&]+$', text) and not text.endswith('.'):
         return True
     return False
